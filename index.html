@@ -253,7 +253,8 @@ const steps = [
 
   {type:"group", id:"redattore", label:"Chi redige", question:"Chi effettua il sopralluogo", fields:[
     {id:"direzioneLavori", label:"Direzione Lavori", type:"text", suggest:"direttori", def: ()=> DL_DEFAULT},
-    {id:"coordinatoreSicurezza", label:"Coordinatore della Sicurezza C.S.P.-C.S.E.", type:"text", suggest:"coordinatori", def: ()=> DL_DEFAULT}
+    {id:"coordinatoreSicurezza", label:"Coordinatore della Sicurezza C.S.P.-C.S.E.", type:"text", suggest:"coordinatori", def: ()=> DL_DEFAULT},
+    {id:"professionisti", label:"Altri professionisti intervenuti nel verbale", type:"text", titoloPicker:true}
   ]},
 
   {type:"dyntable", id:"imprese", label:"Presenti", question:"Erano presenti (imprese e persone)", columns:[
@@ -426,7 +427,8 @@ function render(){
     const impreseQuick = imprese.filter(r=>r.nome||r.titolare).map((r,i)=>
       `<button class="quick-add" data-impresa-i="${i}">+ ${escHtml(nomePresente(r) || r.titolare)}</button>`
     ).join("");
-    const profQuick = "";
+    const profQuick = professionistiList.map((p,i)=>
+      `<button class="quick-add" data-prof-i="${i}">+ ${escHtml(((p.titolo?p.titolo+" ":"")+p.nome).trim())}</button>`).join("");
     inner += `<div class="quick-add-row">
       <button class="quick-add" data-role="Committente e Responsabile dei lavori">+ Committente</button>
       <button class="quick-add" data-role="Direzione Lavori">+ D.L.</button>
@@ -700,7 +702,7 @@ function wireStep(s){
       const input = document.getElementById("gf_"+f.id);
       const box = document.getElementById("sugg_"+f.id);
       if(!input || !box) return;
-      wireSuggest(input, box, allNomi, labelNome, (picked)=>{
+      wireSuggest(input, box, allNomi, labelNomeProf, (picked)=>{
         const t = titoloDaNome(input.value);
         input.value = (t ? t.abbr+" " : "") + picked.nome;
       });
@@ -781,9 +783,10 @@ function wireStep(s){
     });
     document.querySelectorAll(".quick-add[data-prof-i]").forEach(b=>{
       b.addEventListener("click", ()=>{
-        const p = parseProfessionisti(answers.professionisti)[+b.dataset.profI];
+        const p = professionistiList[+b.dataset.profI];
         if(!p) return;
-        addSigner(p.nome, p.ruolo);
+        const t = TITOLI_PROFESSIONALI.find(x=>x.abbr===p.titolo);
+        addSigner(((p.titolo?p.titolo+" ":"")+p.nome).trim(), t ? t.nome : "Professionista");
       });
     });
   }
@@ -860,7 +863,7 @@ function numeroDaSheet(cliente){
   return isNaN(n) ? 0 : n;
 }
 function professionistiPresenti(){
-  return imprese.filter(r=>r.tipo==="prof" && r.nome && r.nome.trim()).map(r=>nomePresente(r)).join(", ");
+  return professionistiList.map(p=> ((p.titolo ? p.titolo+" " : "") + senzaTitolo(p.nome)).trim()).join(", ");
 }
 function suggestNumero(cliente){
   if(!cliente) return "";
@@ -941,7 +944,7 @@ function rememberAnagrafica(){
   if(csp) a.professionisti = rememberName(a.professionisti||[], csp);
 
   // professionisti presenti: si salva solo il nome (Geom./Arch./Ing. si sceglie ogni volta)
-  imprese.filter(r=>r.tipo==="prof" && r.nome && r.nome.trim()).forEach(r=>{
+  professionistiList.filter(r=>r.nome && r.nome.trim()).forEach(r=>{
     const n = nuovoTecnico(r.nome);
     if(n){ professionistiNuovi.push({combinato:n}); a.professionisti = rememberName(a.professionisti||[], n); }
   });
@@ -1186,6 +1189,7 @@ function allNomi(){
   (sheetAnagrafica.direttori||[]).concat(sheetAnagrafica.coordinatori||[]).forEach(n=> add(senzaTitolo(n)));
   return [...mappa.values()];
 }
+function labelNomeProf(it){ return escHtml(it.nome); }   // per architetti/geometri l'indirizzo non serve
 function labelNome(it){
   const sub = it.indirizzo || (it.titolari.length ? "Titolare: "+it.titolari.join(", ") : "");
   return `${escHtml(it.nome)}${sub ? `<small>${escHtml(sub)}</small>` : ""}`;
@@ -1210,7 +1214,7 @@ function openTitoloPicker(fieldId){
       </div>
       <input type="text" id="titoloAltro" placeholder="Scrivi il titolo (es. P.E.)" style="display:none;">
       <label class="field-label" style="margin-top:10px;">Nome e cognome</label>
-      <input type="text" id="profNome" placeholder="Es. Federico Rossi">
+      <div class="sugg-wrap"><input type="text" id="profNome" autocomplete="off" placeholder="Cerca o scrivi: es. Federico Rossi"><div class="sugg-box" id="profSuggest"></div></div>
       <div class="nav-row" style="margin-top:16px;">
         <button class="btn btn-ghost" id="profClose">Annulla</button>
         <button class="btn btn-primary" id="profAdd">Aggiungi</button>
@@ -1233,6 +1237,9 @@ function openTitoloPicker(fieldId){
       }
     });
   });
+  wireSuggest(document.getElementById("profNome"), document.getElementById("profSuggest"), allNomi, labelNomeProf, (picked)=>{
+    document.getElementById("profNome").value = senzaTitolo(picked.nome);
+  });
   wrap.addEventListener("click", e=>{ if(e.target===wrap) wrap.remove(); });
   document.getElementById("profClose").addEventListener("click", ()=> wrap.remove());
   document.getElementById("profAdd").addEventListener("click", ()=>{
@@ -1240,7 +1247,7 @@ function openTitoloPicker(fieldId){
     const titolo = altroVal || titoloScelto;
     const nome = document.getElementById("profNome").value.trim();
     if(!nome){ document.getElementById("profNome").focus(); return; }
-    professionistiList.push({titolo, nome});
+    professionistiList.push({titolo, nome: senzaTitolo(nome)});
     syncProfessionisti(fieldId);
     renderProfList(fieldId);
     wrap.remove();
@@ -1465,11 +1472,17 @@ Regole:
   const istruzioni = (cfg.geminiPrompt && cfg.geminiPrompt.trim()) || istruzioniPredefinite;
   const prompt = `${istruzioni}\n\nTesto originale:\n"""${rawText}"""`;
 
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-  });
+  // 503/429/500 sono quasi sempre temporanei (Gemini sovraccarico): si riprova fino a 3 volte
+  let res;
+  for(let tentativo = 0; tentativo < 3; tentativo++){
+    res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+    });
+    if(res.ok || ![429,500,502,503,504].includes(res.status)) break;
+    await new Promise(r=>setTimeout(r, 1500*(tentativo+1)));
+  }
 
   if(!res.ok){
     const errText = await res.text().catch(()=> "");
@@ -1501,7 +1514,9 @@ function wirePolishButton(){
       if(e.message === "no-key"){
         hint.textContent = "Configura la tua chiave Gemini in Impostazioni (icona in alto) per usare questa funzione.";
       } else {
-        hint.textContent = "Errore Gemini: " + e.message + " — controlla la chiave/modello in Impostazioni.";
+        hint.textContent = /\b(503|429|500|502|504)\b/.test(e.message)
+          ? "Gemini è momentaneamente sovraccarico (non è un problema della chiave). Riprova tra qualche secondo."
+          : "Errore Gemini: " + e.message + " — controlla la chiave/modello in Impostazioni.";
         console.error("Dettaglio errore Gemini:", e);
       }
     }
@@ -1544,7 +1559,7 @@ function renderRows(s){
   const box = document.getElementById("rowsBox");
   box.innerHTML = imprese.map((row,i)=>{
     const tipo = row.tipo || "impresa";
-    const chips = [["impresa","Impresa"],["prof","Professionista"],["altro","Altro"]]
+    const chips = [["impresa","Impresa"],["altro","Altro (persona)"]]
       .map(([v,t])=>`<button type="button" class="chip ${tipo===v?'sel':''}" data-tipo="${v}" data-row="${i}">${t}</button>`).join("");
     let extra = "";
     if(tipo==="prof"){
